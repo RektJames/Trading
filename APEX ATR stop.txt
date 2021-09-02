@@ -1,0 +1,54 @@
+//@version=4
+study(title="APEX - ATR Stop", overlay=true)
+
+atr_length     = input(2, title="Length")
+atr_multiplier = input(1.55, type=input.float, title="Multiplier")
+atr_useHA      = input(false, type=input.bool, title="Use HA Smoothing(Turn on on Normal Candles only)")
+atr_useIntval  = input(false, title = "Use Chart Interval(YES / NO)")
+atr_dintval    = input(title = "Inverval (5, 15, 60,240,D)", defval = '180')
+
+smoothHA( o, h, l, c ) =>
+    hao = 0.0
+    hac = ( o + h + l + c ) / 4
+    hao := na(hao[1])?(o + c / 2 ):(hao[1] + hac[1])/2
+    hah = max(h, max(hao, hac))
+    hal = min(l, min(hao, hac))
+[hao, hah, hal, hac]
+
+[ haOpen, haHigh, haLow, haClose ] = smoothHA(open, high, low, close)
+
+averageTrueRange   = atr(atr_length)
+averageTrueRangeHA = rma(max(abs(haHigh - haClose[1]), max(abs(haLow - haClose[1]), haHigh - haLow)), atr_length)
+averageTrueRangeMultiplied = atr_useHA ? averageTrueRangeHA * atr_multiplier : averageTrueRange * atr_multiplier
+_close    = atr_useHA ? haClose : close
+
+getATRStop( _range, _close ) =>
+    trailingStop     = 0.0
+    trailingStop := iff(_close > nz(trailingStop[1], 0) and _close[1] > nz(trailingStop[1], 0), max(nz(trailingStop[1], 0), _close - _range),
+      iff(_close < nz(trailingStop[1], 0) and _close[1] < nz(trailingStop[1], 0), min(nz(trailingStop[1], 0), _close + _range),
+      iff(_close > nz(trailingStop[1], 0), _close - _range, _close + _range)))
+     
+    sentiment = 0
+    sentiment := nz(sentiment[1], 0)
+    if _close[1] > nz(trailingStop[1], 0) and _close < nz(trailingStop[1], 0)
+        sentiment := -1
+        sentiment
+    if _close[1] < nz(trailingStop[1], 0) and _close > nz(trailingStop[1], 0)
+        sentiment := 1
+        sentiment
+       
+    [trailingStop, sentiment]  
+   
+[trailingStop, sentiment] = getATRStop( averageTrueRangeMultiplied, _close )
+
+start      = security(syminfo.tickerid, atr_dintval, time, lookahead = true)
+newSession = iff(change(start), 1, 0)
+sinceNew   = barssince(newSession)
+
+isChartIntval = sinceNew == 0 and sinceNew[1] == 0 and sinceNew[2] == 0
+_trailingStop = atr_useIntval or isChartIntval ? trailingStop : security(syminfo.tickerid, atr_dintval, trailingStop[1], lookahead = true)
+_sentiment    = atr_useIntval or isChartIntval ? sentiment    : security(syminfo.tickerid, atr_dintval, sentiment[1],    lookahead = true)
+
+// Set color and draw trailingStop not interesting for you
+color_1 = _sentiment == -1 ? color.red : _sentiment == 1 ? color.green : color.blue
+plot(_trailingStop, color=color_1, title="ATR Trailing Stop", linewidth=2)
